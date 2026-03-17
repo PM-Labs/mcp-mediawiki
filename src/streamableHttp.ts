@@ -10,10 +10,11 @@ import { createServer } from './server.js';
 
 const app = express();
 app.use( express.json() );
+app.use( express.urlencoded( { extended: false } ) );
 
-const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN;
-const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID;
-const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET;
+const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN?.trim();
+const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID?.trim();
+const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET?.trim();
 
 // OAuth 2.0 client credentials endpoint for claude.ai custom integrations
 app.post( '/oauth/token', ( req: Request, res: Response ) => {
