@@ -16,6 +16,16 @@ const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN?.trim();
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID?.trim();
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET?.trim();
 
+// OAuth 2.0 discovery endpoint (RFC 8414) — lets claude.ai find the token URL automatically
+app.get( '/.well-known/oauth-authorization-server', ( _req: Request, res: Response ) => {
+	const base = `https://${ _req.headers.host }`;
+	res.json( {
+		issuer: base,
+		token_endpoint: `${ base }/oauth/token`,
+		grant_types_supported: [ 'client_credentials' ]
+	} );
+} );
+
 // OAuth 2.0 client credentials endpoint for claude.ai custom integrations
 app.post( '/oauth/token', ( req: Request, res: Response ) => {
 	const { grant_type, client_id, client_secret } = req.body;
