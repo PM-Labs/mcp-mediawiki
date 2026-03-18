@@ -16,9 +16,18 @@ const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN?.trim();
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID?.trim();
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET?.trim();
 
-// OAuth 2.0 discovery endpoint (RFC 8414) — lets claude.ai find the token URL automatically
-app.get( '/.well-known/oauth-authorization-server', ( _req: Request, res: Response ) => {
-	const base = `https://${ _req.headers.host }`;
+// OAuth protected resource metadata (RFC 8707) — primary discovery endpoint
+app.get( '/.well-known/oauth-protected-resource', ( req: Request, res: Response ) => {
+	const base = `https://${ req.headers.host }`;
+	res.json( {
+		resource: `${ base }/mcp`,
+		authorization_servers: [ base ]
+	} );
+} );
+
+// OAuth authorization server metadata (RFC 8414)
+app.get( '/.well-known/oauth-authorization-server', ( req: Request, res: Response ) => {
+	const base = `https://${ req.headers.host }`;
 	res.json( {
 		issuer: base,
 		token_endpoint: `${ base }/oauth/token`,
@@ -26,15 +35,30 @@ app.get( '/.well-known/oauth-authorization-server', ( _req: Request, res: Respon
 	} );
 } );
 
-// OAuth 2.0 client credentials endpoint for claude.ai custom integrations
+// OAuth 2.0 client credentials token endpoint
 app.post( '/oauth/token', ( req: Request, res: Response ) => {
-	const { grant_type, client_id, client_secret } = req.body;
-	if ( grant_type !== 'client_credentials' ) {
-		res.status( 400 ).json( { error: 'unsupported_grant_type' } );
-		return;
-	}
 	if ( !OAUTH_CLIENT_ID || !OAUTH_CLIENT_SECRET || !AUTH_TOKEN ) {
 		res.status( 500 ).json( { error: 'server_misconfigured' } );
+		return;
+	}
+
+	// Support credentials in Authorization: Basic header or request body
+	let client_id: string | undefined;
+	let client_secret: string | undefined;
+	const basicAuth = req.headers[ 'authorization' ];
+	if ( basicAuth && basicAuth.startsWith( 'Basic ' ) ) {
+		const decoded = Buffer.from( basicAuth.slice( 6 ), 'base64' ).toString();
+		const colon = decoded.indexOf( ':' );
+		client_id = decoded.slice( 0, colon );
+		client_secret = decoded.slice( colon + 1 );
+	} else {
+		client_id = req.body.client_id;
+		client_secret = req.body.client_secret;
+	}
+
+	const grant_type = req.body.grant_type;
+	if ( grant_type && grant_type !== 'client_credentials' ) {
+		res.status( 400 ).json( { error: 'unsupported_grant_type' } );
 		return;
 	}
 	if ( client_id !== OAUTH_CLIENT_ID || client_secret !== OAUTH_CLIENT_SECRET ) {
@@ -53,11 +77,15 @@ app.use( ( req: Request, res: Response, next: Function ) => {
 	}
 	const authHeader = req.headers[ 'authorization' ];
 	if ( !authHeader || !authHeader.startsWith( 'Bearer ' ) ) {
-		res.status( 401 ).json( { error: 'Unauthorized' } );
+		res.status( 401 )
+			.set( 'WWW-Authenticate', `Bearer resource_metadata="https://${ req.headers.host }/.well-known/oauth-protected-resource"` )
+			.json( { error: 'Unauthorized' } );
 		return;
 	}
 	if ( authHeader.slice( 7 ) !== AUTH_TOKEN ) {
-		res.status( 401 ).json( { error: 'Unauthorized' } );
+		res.status( 401 )
+			.set( 'WWW-Authenticate', `Bearer error="invalid_token"` )
+			.json( { error: 'Unauthorized' } );
 		return;
 	}
 	next();
