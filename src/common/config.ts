@@ -66,7 +66,34 @@ export const defaultConfig: Config = {
 };
 const configPath = process.env.CONFIG || 'config.json';
 
+function buildConfigFromEnv(): Config | null {
+	const url = process.env.MEDIAWIKI_URL?.replace( /\/+$/, '' );
+	if ( !url ) {
+		return null;
+	}
+	const parsed = new URL( url );
+	const key = parsed.host;
+	const wiki: WikiConfig = {
+		sitename: process.env.MEDIAWIKI_SITENAME || key,
+		server: `${ parsed.protocol }//${ parsed.host }`,
+		articlepath: process.env.MEDIAWIKI_ARTICLEPATH || '/wiki',
+		scriptpath: process.env.MEDIAWIKI_SCRIPTPATH || '/w',
+		username: process.env.MEDIAWIKI_USERNAME || null,
+		password: process.env.MEDIAWIKI_PASSWORD || null,
+		token: null,
+		private: false
+	};
+	return {
+		defaultWiki: key,
+		wikis: { [ key ]: wiki }
+	};
+}
+
 export function loadConfigFromFile(): Config {
+	const envConfig = buildConfigFromEnv();
+	if ( envConfig ) {
+		return envConfig;
+	}
 	if ( !fs.existsSync( configPath ) ) {
 		return defaultConfig;
 	}
