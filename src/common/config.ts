@@ -81,7 +81,7 @@ function buildConfigFromEnv(): Config | null {
 		username: process.env.MEDIAWIKI_USERNAME || null,
 		password: process.env.MEDIAWIKI_PASSWORD || null,
 		token: null,
-		private: false
+		private: !!( process.env.MEDIAWIKI_USERNAME && process.env.MEDIAWIKI_PASSWORD )
 	};
 	return {
 		defaultWiki: key,
