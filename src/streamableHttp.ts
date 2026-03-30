@@ -112,7 +112,7 @@ app.post( '/oauth/token', ( req: Request, res: Response ) => {
 		}
 
 		delete authCodes[ code ];
-		res.json( { access_token: AUTH_TOKEN, token_type: 'Bearer', expires_in: 86400 } );
+		res.json( { access_token: AUTH_TOKEN, token_type: 'Bearer', expires_in: 2592000 } );
 		return;
 	}
 
@@ -139,7 +139,7 @@ app.post( '/oauth/token', ( req: Request, res: Response ) => {
 			res.status( 401 ).json( { error: 'invalid_client' } );
 			return;
 		}
-		res.json( { access_token: AUTH_TOKEN, token_type: 'Bearer', expires_in: 86400 } );
+		res.json( { access_token: AUTH_TOKEN, token_type: 'Bearer', expires_in: 2592000 } );
 		return;
 	}
 
