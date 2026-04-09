@@ -172,87 +172,67 @@ app.use( ( req: Request, res: Response, next: Function ) => {
 } );
 
 const transports: { [sessionId: string]: StreamableHTTPServerTransport } = {};
-const sessionMap: { [staleId: string]: string } = {};
-const SESSION_MAP_MAX = 100;
-
 app.post( '/mcp', async ( req: Request, res: Response ) => {
 	const sessionId = req.headers[ 'mcp-session-id' ] as string | undefined;
-	let transport: StreamableHTTPServerTransport;
 
+	// Known active session — reuse its transport.
 	if ( sessionId && transports[ sessionId ] ) {
-		transport = transports[ sessionId ];
-	} else if ( sessionId && sessionMap[ sessionId ] && transports[ sessionMap[ sessionId ] ] ) {
-		// Stale session ID already remapped to an active session
-		transport = transports[ sessionMap[ sessionId ] ];
-		console.log( `[SESSION] Reused remap: ${ sessionId.slice( 0, 8 ) }… -> ${ sessionMap[ sessionId ].slice( 0, 8 ) }…` );
-	} else if ( !sessionId && isInitializeRequest( req.body ) ) {
-		transport = new StreamableHTTPServerTransport( {
+		await transports[ sessionId ].handleRequest( req, res, req.body );
+		return;
+	}
+
+	// No session id + initialize request — create a new session.
+	if ( !sessionId && isInitializeRequest( req.body ) ) {
+		const transport = new StreamableHTTPServerTransport( {
 			sessionIdGenerator: () => randomUUID(),
 			onsessioninitialized: ( newId: string ) => {
 				transports[ newId ] = transport;
 			}
 		} );
 		transport.onclose = () => {
-			if ( transport.sessionId ) {
-				delete transports[ transport.sessionId ];
-				for ( const [ stale, active ] of Object.entries( sessionMap ) ) {
-					if ( active === transport.sessionId ) delete sessionMap[ stale ];
-				}
-			}
+			if ( transport.sessionId ) delete transports[ transport.sessionId ];
 		};
 		const server = createServer();
 		await server.connect( transport );
-	} else if ( sessionId && !transports[ sessionId ] ) {
-		// Stale session — auto-initialize and remap
-		console.log( `[SESSION] Stale session ${ sessionId.slice( 0, 8 ) }… — resurrecting` );
-		transport = new StreamableHTTPServerTransport( {
-			sessionIdGenerator: () => randomUUID(),
-			onsessioninitialized: ( newId: string ) => {
-				transports[ newId ] = transport;
-				if ( Object.keys( sessionMap ).length >= SESSION_MAP_MAX ) {
-					delete sessionMap[ Object.keys( sessionMap )[ 0 ] ];
-				}
-				sessionMap[ sessionId! ] = newId;
-				console.log( `[SESSION] Remapped ${ sessionId!.slice( 0, 8 ) }… -> ${ newId.slice( 0, 8 ) }…` );
-			}
-		} );
-		transport.onclose = () => {
-			if ( transport.sessionId ) {
-				delete transports[ transport.sessionId ];
-				for ( const [ stale, active ] of Object.entries( sessionMap ) ) {
-					if ( active === transport.sessionId ) delete sessionMap[ stale ];
-				}
-			}
-		};
-		const server = createServer();
-		await server.connect( transport );
-	} else {
-		res.status( 400 ).json( {
+		await transport.handleRequest( req, res, req.body );
+		return;
+	}
+
+	// Unknown session id — return 404 per MCP spec. A well-behaved client
+	// will reinitialize cleanly. Do NOT silently resurrect — see
+	// PM-Labs/mcp-playwright@1d75780 for root-cause analysis.
+	if ( sessionId ) {
+		res.status( 404 ).json( {
 			jsonrpc: '2.0',
-			error: {
-				code: -32000,
-				message: 'Bad Request: No valid session ID provided'
-			},
+			error: { code: -32001, message: 'Session not found' },
 			id: null
 		} );
 		return;
 	}
 
-	await transport.handleRequest( req, res, req.body );
+	// No session id and not an initialize — malformed request.
+	res.status( 400 ).json( {
+		jsonrpc: '2.0',
+		error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+		id: null
+	} );
 } );
 
 const handleSessionRequest = async ( req: Request, res: Response ): Promise<void> => {
-	let sessionId = req.headers[ 'mcp-session-id' ] as string | undefined;
-	if ( sessionId && !transports[ sessionId ] && sessionMap[ sessionId ] ) {
-		console.log( `[SESSION] Remapped ${ req.method }: ${ sessionId.slice( 0, 8 ) }… -> ${ sessionMap[ sessionId ].slice( 0, 8 ) }…` );
-		sessionId = sessionMap[ sessionId ];
-	}
-	if ( !sessionId || !transports[ sessionId ] ) {
-		res.status( 400 ).send( 'Invalid or missing session ID' );
+	const sessionId = req.headers[ 'mcp-session-id' ] as string | undefined;
+	if ( !sessionId ) {
+		res.status( 400 ).send( 'Missing session ID' );
 		return;
 	}
-
 	const transport = transports[ sessionId ];
+	if ( !transport ) {
+		res.status( 404 ).json( {
+			jsonrpc: '2.0',
+			error: { code: -32001, message: 'Session not found' },
+			id: null
+		} );
+		return;
+	}
 	await transport.handleRequest( req, res );
 };
 
