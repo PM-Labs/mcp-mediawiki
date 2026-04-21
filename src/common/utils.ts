@@ -1,12 +1,45 @@
 import fetch, { Response } from 'node-fetch';
 import { USER_AGENT } from '../server.js';
 import { wikiService } from './wikiService.js';
-import { getMwn } from './mwn.js';
+import { getMwn, clearMwnCache } from './mwn.js';
 
 type RequestConfig = {
 	headers: Record<string, string>;
 	body: Record<string, unknown> | undefined;
 };
+
+class HttpError extends Error {
+	status: number;
+	constructor( message: string, status: number ) {
+		super( message );
+		this.name = 'HttpError';
+		this.status = status;
+	}
+}
+
+// MediaWiki session cookies from a bot-password login can silently expire on the
+// cached mwn instance. When that happens, cookie-based REST calls fail with 401/403
+// while action-API calls still recover via mwn's own retry. On first auth failure
+// we drop the cached mwn (forcing a re-login) and retry the REST call once.
+async function retryOnAuthFailure<T>(
+	op: () => Promise<T>,
+	needAuth: boolean
+): Promise<T> {
+	try {
+		return await op();
+	} catch ( err ) {
+		if ( !( err instanceof HttpError ) || ( err.status !== 401 && err.status !== 403 ) ) {
+			throw err;
+		}
+		const { private: privateWiki, token } = wikiService.getCurrent().config;
+		// Static OAuth2 tokens or fully-public wikis won't benefit from re-login.
+		if ( token || ( !needAuth && !privateWiki ) ) {
+			throw err;
+		}
+		clearMwnCache();
+		return await op();
+	}
+}
 
 async function withAuth(
 	headers: Record<string, string>,
@@ -105,8 +138,9 @@ async function fetchCore(
 	const response = await fetch( url, fetchOptions );
 	if ( !response.ok ) {
 		const errorBody = await response.text().catch( () => 'Could not read error response body' );
-		throw new Error(
-			`HTTP error! status: ${ response.status } for URL: ${ response.url }. Response: ${ errorBody }`
+		throw new HttpError(
+			`HTTP error! status: ${ response.status } for URL: ${ response.url }. Response: ${ errorBody }`,
+			response.status
 		);
 	}
 	return response;
@@ -128,23 +162,25 @@ export async function makeRestGetRequest<T>(
 	params?: Record<string, string>,
 	needAuth: boolean = false
 ): Promise<T> {
-	const headers: Record<string, string> = {
-		Accept: 'application/json'
-	};
+	return retryOnAuthFailure( async () => {
+		const headers: Record<string, string> = {
+			Accept: 'application/json'
+		};
 
-	const { headers: authHeaders } = await withAuth(
-		headers,
-		undefined,
-		needAuth
-	);
+		const { headers: authHeaders } = await withAuth(
+			headers,
+			undefined,
+			needAuth
+		);
 
-	const { server, scriptpath } = wikiService.getCurrent().config;
+		const { server, scriptpath } = wikiService.getCurrent().config;
 
-	const response = await fetchCore( `${ server }${ scriptpath }/rest.php${ path }`, {
-		params,
-		headers: authHeaders
-	} );
-	return ( await response.json() ) as T;
+		const response = await fetchCore( `${ server }${ scriptpath }/rest.php${ path }`, {
+			params,
+			headers: authHeaders
+		} );
+		return ( await response.json() ) as T;
+	}, needAuth );
 }
 
 export async function makeRestPutRequest<T>(
@@ -152,25 +188,27 @@ export async function makeRestPutRequest<T>(
 	body: Record<string, unknown>,
 	needAuth: boolean = false
 ): Promise<T> {
-	const headers: Record<string, string> = {
-		Accept: 'application/json',
-		'Content-Type': 'application/json'
-	};
+	return retryOnAuthFailure( async () => {
+		const headers: Record<string, string> = {
+			Accept: 'application/json',
+			'Content-Type': 'application/json'
+		};
 
-	const { headers: authHeaders, body: authBody } = await withAuth(
-		headers,
-		body,
-		needAuth
-	);
+		const { headers: authHeaders, body: authBody } = await withAuth(
+			headers,
+			body,
+			needAuth
+		);
 
-	const { server, scriptpath } = wikiService.getCurrent().config;
+		const { server, scriptpath } = wikiService.getCurrent().config;
 
-	const response = await fetchCore( `${ server }${ scriptpath }/rest.php${ path }`, {
-		headers: authHeaders,
-		method: 'PUT',
-		body: authBody
-	} );
-	return ( await response.json() ) as T;
+		const response = await fetchCore( `${ server }${ scriptpath }/rest.php${ path }`, {
+			headers: authHeaders,
+			method: 'PUT',
+			body: authBody
+		} );
+		return ( await response.json() ) as T;
+	}, needAuth );
 }
 
 export async function makeRestPostRequest<T>(
@@ -178,25 +216,27 @@ export async function makeRestPostRequest<T>(
 	body?: Record<string, unknown>,
 	needAuth: boolean = false
 ): Promise<T> {
-	const headers: Record<string, string> = {
-		Accept: 'application/json',
-		'Content-Type': 'application/json'
-	};
+	return retryOnAuthFailure( async () => {
+		const headers: Record<string, string> = {
+			Accept: 'application/json',
+			'Content-Type': 'application/json'
+		};
 
-	const { headers: authHeaders, body: authBody } = await withAuth(
-		headers,
-		body,
-		needAuth
-	);
+		const { headers: authHeaders, body: authBody } = await withAuth(
+			headers,
+			body,
+			needAuth
+		);
 
-	const { server, scriptpath } = wikiService.getCurrent().config;
+		const { server, scriptpath } = wikiService.getCurrent().config;
 
-	const response = await fetchCore( `${ server }${ scriptpath }/rest.php${ path }`, {
-		headers: authHeaders,
-		method: 'POST',
-		body: authBody
-	} );
-	return ( await response.json() ) as T;
+		const response = await fetchCore( `${ server }${ scriptpath }/rest.php${ path }`, {
+			headers: authHeaders,
+			method: 'POST',
+			body: authBody
+		} );
+		return ( await response.json() ) as T;
+	}, needAuth );
 }
 
 export async function fetchPageHtml( url: string ): Promise<string | null> {
