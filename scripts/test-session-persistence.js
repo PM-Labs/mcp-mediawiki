@@ -41,9 +41,10 @@
  *      acknowledged but rejected). Anything else (500, 502, hang) means the
  *      server is mishandling stateless requests.
  */
-'use strict';
+// ESM module — the repo's package.json has `"type": "module"`, so node resolves
+// this file as ESM. CommonJS `require()` would throw ReferenceError at runtime.
 
-const { randomUUID } = require('crypto');
+import { randomUUID } from 'node:crypto';
 
 const [, , BASE_URL, TOKEN] = process.argv;
 if (!BASE_URL || !TOKEN) {
