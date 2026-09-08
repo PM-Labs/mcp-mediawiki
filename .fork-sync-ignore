@@ -75,3 +75,7 @@ c48b33795c83f21038201b172268ec84d67263ab
 dea6807f61af30f1b112d2d417ad6d463d06de39
 # Bump @mcpjam/cli from 3.19.0 to 3.23.0
 d3cafc292f2f270c6a02408da00210877fc40bfb
+
+# --- mcp-mediawiki: dependabot dep bumps skipped (2026-09-08) ---
+# These are dev-dep or lock-file-only bumps that conflict with fork's package-lock.json state.
+0c62b311ce07be8a6fe22b7041ad5caa0e5a8de4  # Bump vitest 4.1.10→4.1.11 — package-lock.json conflict
